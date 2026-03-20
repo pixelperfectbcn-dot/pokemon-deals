@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Bell,
@@ -15,96 +15,28 @@ import {
   Star,
   TrendingDown
 } from "lucide-react";
-
-type Deal = {
-  id: number;
-  title: string;
-  source: string;
-  productType: string;
-  setName: string;
-  price: number;
-  pricePerPack: number;
-  score: number;
-  seller: string;
-  status: string;
-  url: string;
-};
-
-const dealsSeed: Deal[] = [
-  {
-    id: 1,
-    title: "Pokémon TCG Scarlet & Violet 151 Booster Bundle",
-    source: "Amazon",
-    productType: "Booster Bundle",
-    setName: "151",
-    price: 32.99,
-    pricePerPack: 5.5,
-    score: 92,
-    seller: "Amazon",
-    status: "Disponible",
-    url: "#"
-  },
-  {
-    id: 2,
-    title: "Pokémon ETB Surging Sparks",
-    source: "Chollos",
-    productType: "ETB",
-    setName: "Surging Sparks",
-    price: 44.9,
-    pricePerPack: 4.99,
-    score: 88,
-    seller: "Tienda externa",
-    status: "Oferta caliente",
-    url: "#"
-  },
-  {
-    id: 3,
-    title: "Pokémon Booster Box Temporal Forces",
-    source: "Amazon",
-    productType: "Booster Box",
-    setName: "Temporal Forces",
-    price: 129.95,
-    pricePerPack: 3.61,
-    score: 95,
-    seller: "Amazon",
-    status: "Disponible",
-    url: "#"
-  },
-  {
-    id: 4,
-    title: "Pack 10 sobres Pokémon variados",
-    source: "Oferta externa",
-    productType: "Booster Pack",
-    setName: "Mixed",
-    price: 39.9,
-    pricePerPack: 3.99,
-    score: 81,
-    seller: "Marketplace",
-    status: "Limitado",
-    url: "#"
-  }
-];
+import type { Deal, DealsResponse } from "@/lib/types";
 
 const sourceStatus = [
   {
     name: "Amazon API",
-    status: "Online",
-    detail: "Consulta oficial de catálogo y ofertas"
+    status: "Pending",
+    detail: "Se conectará en la siguiente fase"
   },
   {
     name: "Webs de ofertas",
-    status: "Online",
+    status: "Pending",
     detail: "Scrapers modulares, RSS o parsers HTML"
   },
   {
     name: "Alertas",
-    status: "Online",
-    detail: "Telegram y email activos"
+    status: "Ready",
+    detail: "UI preparada para Telegram y email"
   },
   {
-    name: "Base de datos",
-    status: "Healthy",
-    detail: "Histórico y deduplicación"
+    name: "Backend API",
+    status: "Online",
+    detail: "Endpoints /api/deals, /api/health y /api/refresh"
   }
 ];
 
@@ -173,14 +105,48 @@ function SectionTitle({
 }
 
 export default function HomePage() {
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState<string>("");
   const [query, setQuery] = useState("pokemon");
   const [type, setType] = useState("all");
   const [source, setSource] = useState("all");
   const [alertsEnabled, setAlertsEnabled] = useState(true);
   const [tab, setTab] = useState<"deals" | "sources" | "architecture">("deals");
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    loadDeals();
+  }, []);
+
+  async function loadDeals() {
+    try {
+      setLoading(true);
+      const response = await fetch("/api/deals", { cache: "no-store" });
+      const data: DealsResponse = await response.json();
+      setDeals(data.deals);
+      setUpdatedAt(data.updatedAt);
+    } catch (error) {
+      console.error("Error cargando deals:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function triggerRefresh() {
+    try {
+      setRefreshing(true);
+      await fetch("/api/refresh", { method: "POST" });
+      await loadDeals();
+    } catch (error) {
+      console.error("Error refrescando:", error);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const filteredDeals = useMemo(() => {
-    return dealsSeed.filter((deal) => {
+    return deals.filter((deal) => {
       const matchesQuery = `${deal.title} ${deal.setName}`
         .toLowerCase()
         .includes(query.toLowerCase());
@@ -188,7 +154,7 @@ export default function HomePage() {
       const matchesSource = source === "all" || deal.source === source;
       return matchesQuery && matchesType && matchesSource;
     });
-  }, [query, type, source]);
+  }, [deals, query, type, source]);
 
   const topDeal = [...filteredDeals].sort((a, b) => b.score - a.score)[0];
 
@@ -201,7 +167,7 @@ export default function HomePage() {
               <div className="space-y-4 md:col-span-2">
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <ShieldCheck className="h-4 w-4" />
-                  Agregador robusto: Amazon API + scrapers de ofertas + alertas
+                  Fase 2: frontend conectado al backend interno
                 </div>
 
                 <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">
@@ -209,15 +175,19 @@ export default function HomePage() {
                 </h1>
 
                 <p className="max-w-2xl text-base text-slate-600 md:text-lg">
-                  Web para detectar las mejores ofertas de sobres, ETB y booster boxes
-                  en Amazon y webs de chollos, con scoring automático, histórico y alertas.
+                  Ahora la web ya consume datos desde la API interna de Next.js y queda preparada
+                  para enchufar PostgreSQL, worker y scraping real en la siguiente fase.
                 </p>
 
                 <div className="flex flex-wrap gap-2 pt-2">
-                  <Badge>Amazon API</Badge>
-                  <Badge>Scrapers modulares</Badge>
-                  <Badge>Telegram Alerts</Badge>
-                  <Badge>Histórico de precios</Badge>
+                  <Badge>API interna</Badge>
+                  <Badge>GET /api/deals</Badge>
+                  <Badge>POST /api/refresh</Badge>
+                  <Badge>Preparado para DB</Badge>
+                </div>
+
+                <div className="text-sm text-slate-500">
+                  {updatedAt ? `Última actualización: ${new Date(updatedAt).toLocaleString("es-ES")}` : "Cargando..."}
                 </div>
               </div>
 
@@ -227,7 +197,9 @@ export default function HomePage() {
                   Ranking por score y precio por sobre
                 </div>
 
-                {topDeal ? (
+                {loading ? (
+                  <div className="text-slate-500">Cargando ofertas...</div>
+                ) : topDeal ? (
                   <div className="space-y-3">
                     <div className="text-sm text-slate-500">{topDeal.source}</div>
                     <div className="text-xl font-semibold leading-snug">{topDeal.title}</div>
@@ -330,15 +302,19 @@ export default function HomePage() {
                 </button>
               </div>
 
-              <button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white hover:bg-slate-800">
+              <button
+                onClick={triggerRefresh}
+                disabled={refreshing}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+              >
                 <Bell className="h-4 w-4" />
-                Guardar alerta
+                {refreshing ? "Actualizando..." : "Probar refresh backend"}
               </button>
             </div>
           </Card>
 
           <div className="space-y-6 lg:col-span-3">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setTab("deals")}
                 className={cls(
@@ -366,64 +342,79 @@ export default function HomePage() {
               >
                 Arquitectura
               </button>
+
+              <button
+                onClick={loadDeals}
+                disabled={loading}
+                className="ml-auto inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-60"
+              >
+                <RefreshCw className={cls("h-4 w-4", loading ? "animate-spin" : "")} />
+                Recargar API
+              </button>
             </div>
 
             {tab === "deals" && (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {filteredDeals.map((deal) => (
-                  <motion.div
-                    key={deal.id}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                  >
-                    <Card className="h-full p-5">
-                      <div className="mb-4 flex items-start justify-between gap-3">
-                        <Badge>{deal.source}</Badge>
-                        <Badge>{deal.score}/100</Badge>
-                      </div>
-
-                      <div className="mb-2 text-lg font-semibold leading-snug">{deal.title}</div>
-                      <div className="mb-4 text-sm text-slate-500">
-                        {deal.setName} · {deal.productType}
-                      </div>
-
-                      <div className="mb-4 grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl bg-slate-100 p-3">
-                          <div className="text-xs text-slate-500">Precio</div>
-                          <div className="text-lg font-semibold">€{deal.price.toFixed(2)}</div>
+                {loading ? (
+                  <Card className="p-5 md:col-span-2 xl:col-span-3">
+                    <div className="text-slate-500">Cargando ofertas desde /api/deals...</div>
+                  </Card>
+                ) : (
+                  filteredDeals.map((deal) => (
+                    <motion.div
+                      key={deal.id}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      <Card className="h-full p-5">
+                        <div className="mb-4 flex items-start justify-between gap-3">
+                          <Badge>{deal.source}</Badge>
+                          <Badge>{deal.score}/100</Badge>
                         </div>
-                        <div className="rounded-2xl bg-slate-100 p-3">
-                          <div className="text-xs text-slate-500">€/sobre</div>
-                          <div className="text-lg font-semibold">
-                            €{deal.pricePerPack.toFixed(2)}
+
+                        <div className="mb-2 text-lg font-semibold leading-snug">{deal.title}</div>
+                        <div className="mb-4 text-sm text-slate-500">
+                          {deal.setName} · {deal.productType}
+                        </div>
+
+                        <div className="mb-4 grid grid-cols-2 gap-3">
+                          <div className="rounded-2xl bg-slate-100 p-3">
+                            <div className="text-xs text-slate-500">Precio</div>
+                            <div className="text-lg font-semibold">€{deal.price.toFixed(2)}</div>
+                          </div>
+                          <div className="rounded-2xl bg-slate-100 p-3">
+                            <div className="text-xs text-slate-500">€/sobre</div>
+                            <div className="text-lg font-semibold">
+                              €{deal.pricePerPack.toFixed(2)}
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      <div className="mb-4 flex flex-wrap gap-2 text-sm text-slate-600">
-                        <span className="inline-flex items-center gap-1">
-                          <Package className="h-4 w-4" />
-                          {deal.seller}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <Star className="h-4 w-4" />
-                          {badgeByScore(deal.score)}
-                        </span>
-                      </div>
+                        <div className="mb-4 flex flex-wrap gap-2 text-sm text-slate-600">
+                          <span className="inline-flex items-center gap-1">
+                            <Package className="h-4 w-4" />
+                            {deal.seller}
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <Star className="h-4 w-4" />
+                            {badgeByScore(deal.score)}
+                          </span>
+                        </div>
 
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-slate-500">{deal.status}</span>
-                        <a
-                          href={deal.url}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium hover:bg-slate-50"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                          Ver
-                        </a>
-                      </div>
-                    </Card>
-                  </motion.div>
-                ))}
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-slate-500">{deal.status}</span>
+                          <a
+                            href={deal.url}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium hover:bg-slate-50"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            Ver
+                          </a>
+                        </div>
+                      </Card>
+                    </motion.div>
+                  ))
+                )}
               </div>
             )}
 
@@ -449,38 +440,38 @@ export default function HomePage() {
                   <SectionTitle icon={<Globe className="h-4 w-4" />} title="Frontend" />
                   <div className="space-y-3 text-slate-700">
                     <p>Next.js para la web pública y panel privado.</p>
-                    <p>Filtros por set, tipo de producto, score, fuente y rango de precio.</p>
-                    <p>Dashboard con top deals, histórico y configuración de alertas.</p>
+                    <p>La UI ya consume datos desde el backend interno.</p>
+                    <p>Preparado para pasar a datos persistidos en PostgreSQL.</p>
                   </div>
                 </Card>
 
                 <Card className="p-5">
-                  <SectionTitle icon={<RefreshCw className="h-4 w-4" />} title="Ingesta" />
+                  <SectionTitle icon={<RefreshCw className="h-4 w-4" />} title="Backend" />
                   <div className="space-y-3 text-slate-700">
-                    <p>Amazon vía API oficial.</p>
-                    <p>Webs externas mediante scrapers modulares, RSS o parsers HTML.</p>
-                    <p>Jobs programados, deduplicación y scoring centralizado.</p>
+                    <p>GET /api/deals devuelve el catálogo actual.</p>
+                    <p>GET /api/health sirve para checks de salud.</p>
+                    <p>POST /api/refresh queda listo para enchufar el worker.</p>
                   </div>
                 </Card>
 
                 <Card className="p-5">
                   <SectionTitle icon={<Database className="h-4 w-4" />} title="Datos" />
                   <div className="space-y-3 text-slate-700">
-                    <p>PostgreSQL para histórico de precios, productos, fuentes y alertas.</p>
-                    <p>Redis opcional para cola de trabajos y caché.</p>
-                    <p>Modelo orientado a producto normalizado y snapshots de precio.</p>
+                    <p>Ahora mismo hay datos mock centralizados en lib/deals.ts.</p>
+                    <p>La siguiente fase será PostgreSQL + price_history.</p>
+                    <p>La estructura ya separa tipos y capa de datos.</p>
                   </div>
                 </Card>
 
                 <Card className="p-5">
                   <SectionTitle
                     icon={<TrendingDown className="h-4 w-4" />}
-                    title="Lógica de negocio"
+                    title="Siguiente fase"
                   />
                   <div className="space-y-3 text-slate-700">
-                    <p>Score por precio por sobre, fiabilidad de seller, disponibilidad y tipo.</p>
-                    <p>Alertas cuando una oferta supera un umbral configurable.</p>
-                    <p>Separación entre sellado, ETB, booster box y singles.</p>
+                    <p>Conectar base de datos en Railway.</p>
+                    <p>Añadir scraper/worker y cron jobs.</p>
+                    <p>Reemplazar mocks por datos reales de ofertas.</p>
                   </div>
                 </Card>
               </div>
