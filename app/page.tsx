@@ -61,7 +61,7 @@ export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState("");
-  const [query, setQuery] = useState("pokemon");
+  const [query, setQuery] = useState("pokémon");
   const [type, setType] = useState("all");
   const [source, setSource] = useState("all");
   const [alertsEnabled, setAlertsEnabled] = useState(true);
