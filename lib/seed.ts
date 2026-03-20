@@ -1,6 +1,6 @@
-import { Deal } from "./types";
+import type { Deal } from "./types";
 
-const dealsSeed: Deal[] = [
+export const seedDeals: Deal[] = [
   {
     id: 1,
     title: "Pokémon TCG Scarlet & Violet 151 Booster Bundle",
@@ -54,7 +54,3 @@ const dealsSeed: Deal[] = [
     url: "#"
   }
 ];
-
-export function getDeals(): Deal[] {
-  return dealsSeed;
-}

@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server";
-import { replaceDealsWithSeed, getDealsFromDb } from "@/lib/repository";
+import { ensureSchema, replaceDealsWithSeed, getDealsFromDb } from "@/lib/repository";
 
 export async function POST() {
   try {
+    await ensureSchema();
     await replaceDealsWithSeed();
     const deals = await getDealsFromDb();
 
     return NextResponse.json({
       ok: true,
-      message: "Deals refrescados en PostgreSQL",
+      message: "Base de datos inicializada y seed cargada",
       count: deals.length,
-      triggeredAt: new Date().toISOString()
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
-        message: "Error refrescando deals",
+        message: "Error inicializando la base de datos",
         error: error instanceof Error ? error.message : "Unknown error"
       },
       { status: 500 }

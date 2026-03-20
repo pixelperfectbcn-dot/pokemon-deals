@@ -16,12 +16,13 @@ import {
   TrendingDown
 } from "lucide-react";
 import type { Deal, DealsResponse } from "@/lib/types";
+import { normalizeText } from "@/lib/text";
 
 const sourceStatus = [
   { name: "Amazon API", status: "Pending", detail: "Se conectará en la siguiente fase" },
   { name: "Webs de ofertas", status: "Pending", detail: "Scrapers modulares, RSS o parsers HTML" },
   { name: "Alertas", status: "Ready", detail: "UI preparada para Telegram y email" },
-  { name: "Backend API", status: "Online", detail: "Endpoints /api/deals, /api/health y /api/refresh" }
+  { name: "PostgreSQL", status: "Online", detail: "Deals persistidos en base de datos" }
 ];
 
 function badgeByScore(score: number) {
@@ -76,10 +77,11 @@ export default function HomePage() {
       setLoading(true);
       const response = await fetch("/api/deals", { cache: "no-store" });
       const data: DealsResponse = await response.json();
-      setDeals(data.deals);
-      setUpdatedAt(data.updatedAt);
+      setDeals(data.deals ?? []);
+      setUpdatedAt(data.updatedAt ?? "");
     } catch (error) {
       console.error("Error cargando deals:", error);
+      setDeals([]);
     } finally {
       setLoading(false);
     }
@@ -99,7 +101,9 @@ export default function HomePage() {
 
   const filteredDeals = useMemo(() => {
     return deals.filter((deal) => {
-      const matchesQuery = `${deal.title} ${deal.setName}`.toLowerCase().includes(query.toLowerCase());
+      const haystack = normalizeText(`${deal.title} ${deal.setName}`);
+      const needle = normalizeText(query);
+      const matchesQuery = haystack.includes(needle);
       const matchesType = type === "all" || deal.productType === type;
       const matchesSource = source === "all" || deal.source === source;
       return matchesQuery && matchesType && matchesSource;
@@ -117,21 +121,21 @@ export default function HomePage() {
               <div className="space-y-4 md:col-span-2">
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <ShieldCheck className="h-4 w-4" />
-                  Fase 2: frontend conectado al backend interno
+                  Fase 3: PostgreSQL conectado a la app
                 </div>
 
                 <h1 className="text-3xl font-semibold tracking-tight md:text-5xl">Pokemon Deals Radar</h1>
 
                 <p className="max-w-2xl text-base text-slate-600 md:text-lg">
-                  Ahora la web ya consume datos desde la API interna de Next.js y queda preparada
-                  para enchufar PostgreSQL, worker y scraping real en la siguiente fase.
+                  Ahora los deals viven en PostgreSQL dentro de Railway. La web ya no depende de
+                  mocks en memoria y queda preparada para conectar el scraper real.
                 </p>
 
                 <div className="flex flex-wrap gap-2 pt-2">
-                  <Badge>API interna</Badge>
+                  <Badge>PostgreSQL</Badge>
                   <Badge>GET /api/deals</Badge>
+                  <Badge>POST /api/init</Badge>
                   <Badge>POST /api/refresh</Badge>
-                  <Badge>Preparado para DB</Badge>
                 </div>
 
                 <div className="text-sm text-slate-500">
@@ -149,14 +153,11 @@ export default function HomePage() {
                   <div className="space-y-3">
                     <div className="text-sm text-slate-500">{topDeal.source}</div>
                     <div className="text-xl font-semibold leading-snug">{topDeal.title}</div>
-
                     <div className="flex items-center justify-between">
                       <span className="text-3xl font-bold">€{topDeal.price.toFixed(2)}</span>
                       <Badge>{badgeByScore(topDeal.score)}</Badge>
                     </div>
-
                     <div className="text-sm text-slate-600">€{topDeal.pricePerPack.toFixed(2)} por sobre</div>
-
                     <a href={topDeal.url} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white hover:bg-slate-800">
                       <ExternalLink className="h-4 w-4" />
                       Ver oferta
@@ -173,7 +174,6 @@ export default function HomePage() {
         <div className="grid gap-6 lg:grid-cols-4">
           <Card className="p-5 lg:col-span-1">
             <SectionTitle icon={<Filter className="h-4 w-4" />} title="Filtros" subtitle="Filtra por búsqueda, tipo y fuente" />
-
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-medium">Buscar</label>
@@ -216,7 +216,7 @@ export default function HomePage() {
 
               <button onClick={triggerRefresh} disabled={refreshing} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60">
                 <Bell className="h-4 w-4" />
-                {refreshing ? "Actualizando..." : "Probar refresh backend"}
+                {refreshing ? "Actualizando..." : "Recargar desde PostgreSQL"}
               </button>
             </div>
           </Card>
@@ -309,35 +309,35 @@ export default function HomePage() {
                   <SectionTitle icon={<Globe className="h-4 w-4" />} title="Frontend" />
                   <div className="space-y-3 text-slate-700">
                     <p>Next.js para la web pública y panel privado.</p>
-                    <p>La UI ya consume datos desde el backend interno.</p>
-                    <p>Preparado para pasar a datos persistidos en PostgreSQL.</p>
+                    <p>Búsqueda normalizada sin problema de tildes.</p>
+                    <p>La UI consume deals reales desde PostgreSQL.</p>
                   </div>
                 </Card>
 
                 <Card className="p-5">
                   <SectionTitle icon={<RefreshCw className="h-4 w-4" />} title="Backend" />
                   <div className="space-y-3 text-slate-700">
-                    <p>GET /api/deals devuelve el catálogo actual.</p>
-                    <p>GET /api/health sirve para checks de salud.</p>
-                    <p>POST /api/refresh queda listo para enchufar el worker.</p>
+                    <p>GET /api/deals consulta la base de datos.</p>
+                    <p>GET /api/health valida la conexión con PostgreSQL.</p>
+                    <p>POST /api/init crea la tabla y carga el seed.</p>
                   </div>
                 </Card>
 
                 <Card className="p-5">
                   <SectionTitle icon={<Database className="h-4 w-4" />} title="Datos" />
                   <div className="space-y-3 text-slate-700">
-                    <p>Ahora mismo hay datos mock centralizados en lib/deals.ts.</p>
-                    <p>La siguiente fase será PostgreSQL + price_history.</p>
-                    <p>La estructura ya separa tipos y capa de datos.</p>
+                    <p>Deals persistidos en PostgreSQL en Railway.</p>
+                    <p>Preparado para añadir price_history en la siguiente fase.</p>
+                    <p>Seed y repositorio separados de la capa API.</p>
                   </div>
                 </Card>
 
                 <Card className="p-5">
                   <SectionTitle icon={<TrendingDown className="h-4 w-4" />} title="Siguiente fase" />
                   <div className="space-y-3 text-slate-700">
-                    <p>Conectar base de datos en Railway.</p>
-                    <p>Añadir scraper/worker y cron jobs.</p>
-                    <p>Reemplazar mocks por datos reales de ofertas.</p>
+                    <p>Añadir scraper/worker separado.</p>
+                    <p>Guardar histórico de precios.</p>
+                    <p>Conectar fuentes reales y alertas.</p>
                   </div>
                 </Card>
               </div>

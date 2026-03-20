@@ -10,6 +10,8 @@ export type Deal = {
   seller: string;
   status: string;
   url: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type DealsResponse = {
