@@ -1,29 +1,13 @@
 import { NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+import { Pool } from "pg";
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 export async function GET() {
   try {
-    const dbResult = await pool.query("SELECT NOW() AS now");
-
-    return NextResponse.json({
-      ok: true,
-      service: "pokemon-deals-api",
-      status: "healthy",
-      database: "connected",
-      timestamp: new Date().toISOString(),
-      dbTime: dbResult.rows[0]?.now ?? null
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        service: "pokemon-deals-api",
-        status: "degraded",
-        database: "disconnected",
-        error: error instanceof Error ? error.message : "Unknown error",
-        timestamp: new Date().toISOString()
-      },
-      { status: 500 }
-    );
+    await pool.query("SELECT 1");
+    return NextResponse.json({ ok: true, database: "connected" });
+  } catch (e:any) {
+    return NextResponse.json({ ok: false, database: "disconnected", error: e.message });
   }
 }
