@@ -1,12 +1,12 @@
-console.log("AMAZON PARSER V2 LOADED");
+import { chromium } from "playwright";
 import type { Deal } from "./types";
-import { normalizeText, parsePriceFromText, stripHtml } from "./text";
+import { normalizeText, parsePriceFromText } from "./text";
 
-type ParsedStoreItem = {
+type DomItem = {
   asin: string;
   title: string;
   url: string;
-  price?: number;
+  priceText?: string;
 };
 
 function classifyProduct(title: string) {
@@ -50,11 +50,11 @@ function inferPricePerPack(title: string, price: number, productType: string) {
 }
 
 function inferScore(pricePerPack: number) {
-  let score = 70;
+  let score = 72;
   if (pricePerPack <= 3.7) score += 25;
   else if (pricePerPack <= 4.5) score += 18;
   else if (pricePerPack <= 5.5) score += 10;
-  return Math.min(99, score + 7);
+  return Math.min(99, score + 6);
 }
 
 function absoluteUrl(url: string, baseUrl: string) {
@@ -63,141 +63,100 @@ function absoluteUrl(url: string, baseUrl: string) {
   return `${baseUrl}/${url}`;
 }
 
-function unescapeJsonText(value: string) {
-  return value
-    .replace(/\\\"/g, '"')
-    .replace(/\\u0026/g, "&")
-    .replace(/\\u003d/g, "=")
-    .replace(/\\u002F/g, "/")
-    .replace(/\\\\/g, "\\");
+function cleanText(value: string | null | undefined) {
+  return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function parseAmountFromMoneyJson(block: string): number | undefined {
-  const amountMatch = block.match(/\"amount\"\s*:\s*(\d+(?:\.\d+)?)/);
-  if (amountMatch) return Number(amountMatch[1]);
-
-  const displayStringMatch = block.match(/\"displayString\"\s*:\s*\"([^\"]+)\"/);
-  if (displayStringMatch) return parsePriceFromText(displayStringMatch[1]);
-
-  return undefined;
-}
-
-function parseStoreItems(html: string, baseUrl: string): ParsedStoreItem[] {
-  const items: ParsedStoreItem[] = [];
-  const seenAsins = new Set<string>();
-
-  const cardRegex = /<div[^>]+data-asin="([A-Z0-9]{10})"[\s\S]*?(?=<div[^>]+data-asin=|$)/gi;
-
-  let match: RegExpExecArray | null = null;
-  while ((match = cardRegex.exec(html)) !== null) {
-    const asin = match[1];
-    const block = match[0];
-    if (seenAsins.has(asin)) continue;
-
-    const titleMatch =
-      block.match(/<h2[^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>[\s\S]*?<\/h2>/i) ||
-      block.match(/aria-label="([^"]+)"/i) ||
-      block.match(/\"title\"\s*:\s*\"([^\"]+)\"/i);
-
-    const hrefMatch =
-      block.match(new RegExp(`<a[^>]+href="([^"]*\\/dp\\/${asin}[^"]*)"`, "i")) ||
-      block.match(/<a[^>]+class="[^"]*(?:a-link-normal|s-no-outline)[^"]*"[^>]+href="([^"]+)"/i);
-
-    const priceOffscreenMatch = block.match(/<span class="a-offscreen">([^<]+)<\/span>/i);
-    const price = priceOffscreenMatch
-      ? parsePriceFromText(priceOffscreenMatch[1])
-      : parseAmountFromMoneyJson(block);
-
-    const title = titleMatch ? stripHtml(unescapeJsonText(titleMatch[1])) : "";
-    const href = hrefMatch ? unescapeJsonText(hrefMatch[1]) : `/dp/${asin}`;
-
-    if (!title) continue;
-
-    items.push({
-      asin,
-      title,
-      url: absoluteUrl(href, baseUrl),
-      price
-    });
-    seenAsins.add(asin);
-  }
-
-  if (items.length === 0) {
-    const asinMatches = [...html.matchAll(/\"data-asin\"\s*:\s*\"([A-Z0-9]{10})\"|data-asin="([A-Z0-9]{10})"/g)];
-    for (const raw of asinMatches) {
-      const asin = raw[1] || raw[2];
-      if (!asin || seenAsins.has(asin)) continue;
-
-      const index = raw.index ?? 0;
-      const context = html.slice(Math.max(0, index - 5000), Math.min(html.length, index + 15000));
-
-      const titleMatch =
-        context.match(/\"title\"\s*:\s*\"([^\"]+)\"/i) ||
-        context.match(/aria-label="([^"]+)"/i);
-
-      const displayPriceMatch = context.match(/\"displayString\"\s*:\s*\"([^\"]+)\"/i);
-      const amountMatch = context.match(/\"amount\"\s*:\s*(\d+(?:\.\d+)?)/i);
-      const hrefMatch =
-        context.match(new RegExp(`\"(\\/[^\"]*\\/dp\\/${asin}[^\"]*)\"`, "i")) ||
-        context.match(new RegExp(`<a[^>]+href="([^"]*\\/dp\\/${asin}[^"]*)"`, "i"));
-
-      const title = titleMatch ? stripHtml(unescapeJsonText(titleMatch[1])) : "";
-      const price = amountMatch
-        ? Number(amountMatch[1])
-        : displayPriceMatch
-          ? parsePriceFromText(displayPriceMatch[1])
-          : undefined;
-
-      if (!title) continue;
-
-      items.push({
-        asin,
-        title,
-        url: absoluteUrl(hrefMatch ? unescapeJsonText(hrefMatch[1]) : `/dp/${asin}`, baseUrl),
-        price
-      });
-      seenAsins.add(asin);
-    }
-  }
-
-  return items;
-}
-
-function filterStoreItems(items: ParsedStoreItem[]) {
-  const requirePokemon = (process.env.AMAZON_REQUIRE_POKEMON ?? "true").toLowerCase() !== "false";
-  const allowedTypes = (process.env.AMAZON_ALLOWED_PRODUCT_TYPES ?? "ETB,Booster Box,Booster Bundle,Booster Pack,Other")
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
-
-  const filtered = items.filter((item) => {
-    const title = normalizeText(item.title);
-    const isPokemon =
-      !requirePokemon ||
-      title.includes("pokemon") ||
-      title.includes("pokémon") ||
-      title.includes("jcc pokemon") ||
-      title.includes("pokemon tcg");
-    const hasPrice = typeof item.price === "number" && item.price > 0;
-    const productType = classifyProduct(item.title);
-    return isPokemon && hasPrice && allowedTypes.includes(productType);
+async function scrapeWithPlaywright(storeUrl: string, baseUrl: string): Promise<DomItem[]> {
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled"
+    ]
   });
 
-  const deduped = new Map<string, ParsedStoreItem>();
-  for (const item of filtered) {
-    const key = [
-      item.asin || "",
-      normalizeText(item.title),
-      classifyProduct(item.title),
-      inferSetName(item.title)
-    ].join("|");
+  try {
+    const context = await browser.newContext({
+      locale: "es-ES",
+      viewport: { width: 1440, height: 2200 },
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    });
 
-    if (!deduped.has(key)) {
-      deduped.set(key, item);
+    const page = await context.newPage();
+
+    await page.route("**/*", async (route) => {
+      const type = route.request().resourceType();
+      if (["image", "font", "media"].includes(type)) {
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto(storeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForTimeout(7000);
+
+    const title = await page.title();
+    if (normalizeText(title).includes("captcha")) {
+      throw new Error("Amazon mostró captcha en Playwright");
     }
-  }
 
-  return [...deduped.values()];
+    const rawItems = await page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll("[data-asin]"));
+      return cards.map((card) => {
+        const asin = card.getAttribute("data-asin") || "";
+        const title =
+          (card.querySelector("h2 span")?.textContent ||
+            card.querySelector('[aria-label]')?.getAttribute("aria-label") ||
+            "") as string;
+
+        const link =
+          (card.querySelector('a[href*="/dp/"]')?.getAttribute("href") ||
+            card.querySelector("a")?.getAttribute("href") ||
+            "") as string;
+
+        const priceText =
+          (card.querySelector(".a-offscreen")?.textContent ||
+            "") as string;
+
+        return {
+          asin,
+          title,
+          url: link,
+          priceText
+        };
+      });
+    });
+
+    const filtered = rawItems
+      .map((item) => ({
+        asin: cleanText(item.asin),
+        title: cleanText(item.title),
+        url: cleanText(item.url),
+        priceText: cleanText(item.priceText)
+      }))
+      .filter((item) => item.asin && item.title && item.url && item.priceText);
+
+    const deduped = new Map<string, DomItem>();
+    for (const item of filtered) {
+      if (!deduped.has(item.asin)) {
+        deduped.set(item.asin, {
+          asin: item.asin,
+          title: item.title,
+          url: absoluteUrl(item.url, baseUrl),
+          priceText: item.priceText
+        });
+      }
+    }
+
+    return [...deduped.values()];
+  } finally {
+    await browser.close();
+  }
 }
 
 export async function fetchAmazonOfficialStoreDeals(): Promise<Omit<Deal, "id" | "createdAt" | "updatedAt">[]> {
@@ -207,36 +166,42 @@ export async function fetchAmazonOfficialStoreDeals(): Promise<Omit<Deal, "id" |
   const storeUrl = process.env.AMAZON_STORE_URL;
   const baseUrl = process.env.AMAZON_BASE_URL ?? "https://www.amazon.es";
   const limit = Number(process.env.AMAZON_STORE_RESULT_LIMIT ?? "24");
+  const requirePokemon = (process.env.AMAZON_REQUIRE_POKEMON ?? "false").toLowerCase() !== "false";
+  const allowedTypes = (process.env.AMAZON_ALLOWED_PRODUCT_TYPES ?? "ETB,Booster Box,Booster Bundle,Booster Pack,Other")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
 
   if (!storeUrl) {
     throw new Error("AMAZON_STORE_URL no está configurada");
   }
 
-  const response = await fetch(storeUrl, {
-    headers: {
-      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      "accept-language": "es-ES,es;q=0.9,en;q=0.8"
-    },
-    cache: "no-store"
-  });
+  const rawItems = await scrapeWithPlaywright(storeUrl, baseUrl);
 
-  if (!response.ok) {
-    throw new Error(`Amazon store respondió con status ${response.status}`);
-  }
-
-  const html = await response.text();
-  console.log("HTML LENGTH:", html.length);
-  console.log("HTML PREVIEW:", html.slice(0, 1000));
-
-  if (normalizeText(html).includes("captcha") || normalizeText(html).includes("introduce los caracteres")) {
-    throw new Error("Amazon store devolvió captcha");
-  }
-
-  const parsed = parseStoreItems(html, baseUrl);
-  const filtered = filterStoreItems(parsed).slice(0, limit);
+  const filtered = rawItems
+    .map((item) => {
+      const price = item.priceText ? parsePriceFromText(item.priceText) : undefined;
+      return { ...item, price };
+    })
+    .filter((item) => typeof item.price === "number" && item.price > 0)
+    .filter((item) => {
+      const normalized = normalizeText(item.title);
+      if (!requirePokemon) return true;
+      return (
+        normalized.includes("pokemon") ||
+        normalized.includes("pokémon") ||
+        normalized.includes("jcc pokemon") ||
+        normalized.includes("pokemon tcg")
+      );
+    })
+    .filter((item) => {
+      const productType = classifyProduct(item.title);
+      return allowedTypes.includes(productType);
+    })
+    .slice(0, limit);
 
   if (!filtered.length) {
-    throw new Error("Amazon store no devolvió productos parseables con precio");
+    throw new Error("Playwright no encontró productos válidos con precio en la tienda oficial");
   }
 
   return filtered.map((item) => {
@@ -254,7 +219,7 @@ export async function fetchAmazonOfficialStoreDeals(): Promise<Omit<Deal, "id" |
       pricePerPack,
       score: inferScore(pricePerPack),
       seller: "JCC Pokémon Amazon Store ES",
-      status: "Detectado en tienda oficial",
+      status: "Detectado con Playwright",
       url: item.url
     };
   });
