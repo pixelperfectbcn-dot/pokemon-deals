@@ -1,2 +1,0 @@
-export function normalizeText(value: string) { return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
-export function parsePriceFromText(value: string) { const normalized = value.replace(/\./g, '').replace(/,/g, '.'); const match = normalized.match(/(?:€|eur|euro|euros)?\s*(\d+(?:\.\d{1,2})?)/i) || normalized.match(/(\d+(?:\.\d{1,2})?)\s*(?:€|eur|euro|euros)/i); return match ? Number(match[1]) : undefined; }
