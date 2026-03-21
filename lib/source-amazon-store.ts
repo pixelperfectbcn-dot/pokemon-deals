@@ -97,8 +97,17 @@ async function scrapeWithPlaywright(storeUrl: string, baseUrl: string): Promise<
       await route.continue();
     });
 
-    await page.goto(storeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForTimeout(7000);
+await page.goto(storeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+
+// Espera a que aparezcan precios reales
+await page.waitForSelector(".a-offscreen", { timeout: 20000 });
+
+// Hace scroll para que Amazon cargue más productos
+await page.evaluate(() => {
+  window.scrollBy(0, window.innerHeight * 3);
+});
+
+await page.waitForTimeout(3000);
 
     const title = await page.title();
     if (normalizeText(title).includes("captcha")) {
