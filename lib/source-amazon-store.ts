@@ -1,3 +1,4 @@
+console.log("AMAZON PARSER V2 LOADED");
 import type { Deal } from "./types";
 import { normalizeText, parsePriceFromText, stripHtml } from "./text";
 
