@@ -225,6 +225,8 @@ export async function fetchAmazonOfficialStoreDeals(): Promise<Omit<Deal, "id" |
   }
 
   const html = await response.text();
+  console.log("HTML LENGTH:", html.length);
+  console.log("HTML PREVIEW:", html.slice(0, 1000));
 
   if (normalizeText(html).includes("captcha") || normalizeText(html).includes("introduce los caracteres")) {
     throw new Error("Amazon store devolvió captcha");
