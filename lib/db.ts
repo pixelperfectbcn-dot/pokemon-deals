@@ -5,7 +5,7 @@ declare global {
   var __pokemonDealsPool: Pool | undefined;
 }
 
-function createPool() {
+function createPool(): Pool {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL no está configurada");
@@ -18,13 +18,14 @@ function createPool() {
   return global.__pokemonDealsPool;
 }
 
-export function getPool() {
+export function getPool(): Pool {
   return createPool();
 }
 
-// Wrapper lazy para evitar que Next intente conectar a la DB durante el build
+// Wrapper lazy compatible con todas las llamadas existentes a pool.query(...)
 export const pool = {
-  query: async (...args: Parameters<Pool["query"]>) => {
-    return createPool().query(...args);
+  query: async (...args: any[]) => {
+    const realPool = createPool();
+    return (realPool.query as any)(...args);
   }
 };
