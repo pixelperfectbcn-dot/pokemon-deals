@@ -85,7 +85,7 @@ function parseStoreItems(html: string, baseUrl: string): ParsedStoreItem[] {
   const items: ParsedStoreItem[] = [];
   const seenAsins = new Set<string>();
 
-  const cardRegex = /<div[^>]+data-asin="([A-Z0-9]{10})"[\s\S]*?<\/li>/gi;
+  const cardRegex = /<div[^>]+data-asin="([A-Z0-9]{10})"[\s\S]*?(?=<div[^>]+data-asin=|$)/gi;
 
   let match: RegExpExecArray | null = null;
   while ((match = cardRegex.exec(html)) !== null) {
