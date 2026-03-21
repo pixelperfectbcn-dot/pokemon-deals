@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "cron:refresh": "node scripts/cron-refresh.mjs"
+    "cron:refresh": "node scripts/cron-refresh.mjs",
+    "postinstall": "playwright install chromium"
   },
   "dependencies": {
     "framer-motion": "^11.11.9",
