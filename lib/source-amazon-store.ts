@@ -67,6 +67,25 @@ function cleanText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+async function autoScroll(page: any) {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      let totalHeight = 0;
+      const distance = 1000;
+      const timer = setInterval(() => {
+        const scrollHeight = document.body.scrollHeight;
+        window.scrollBy(0, distance);
+        totalHeight += distance;
+
+        if (totalHeight >= scrollHeight * 2) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 400);
+    });
+  });
+}
+
 async function scrapeWithPlaywright(storeUrl: string, baseUrl: string): Promise<DomItem[]> {
   const browser = await chromium.launch({
     headless: true,
@@ -97,17 +116,14 @@ async function scrapeWithPlaywright(storeUrl: string, baseUrl: string): Promise<
       await route.continue();
     });
 
-await page.goto(storeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto(storeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
 
-// Espera a que aparezcan precios reales
-await page.waitForSelector(".a-offscreen", { timeout: 20000 });
-
-// Hace scroll para que Amazon cargue más productos
-await page.evaluate(() => {
-  window.scrollBy(0, window.innerHeight * 3);
-});
-
-await page.waitForTimeout(3000);
+    // La clave: .a-offscreen suele estar oculto y nunca estará "visible".
+    // Esperamos a que existan productos y luego hacemos scroll para cargar más bloques.
+    await page.waitForSelector("[data-asin]", { timeout: 30000, state: "attached" });
+    await page.waitForTimeout(4000);
+    await autoScroll(page);
+    await page.waitForTimeout(4000);
 
     const title = await page.title();
     if (normalizeText(title).includes("captcha")) {
@@ -130,6 +146,7 @@ await page.waitForTimeout(3000);
 
         const priceText =
           (card.querySelector(".a-offscreen")?.textContent ||
+            card.querySelector('[class*="price"] .a-offscreen')?.textContent ||
             "") as string;
 
         return {
@@ -141,6 +158,9 @@ await page.waitForTimeout(3000);
       });
     });
 
+    console.log("PLAYWRIGHT RAW ITEMS:", rawItems.length);
+    console.log("PLAYWRIGHT RAW SAMPLE:", JSON.stringify(rawItems.slice(0, 5)));
+
     const filtered = rawItems
       .map((item) => ({
         asin: cleanText(item.asin),
@@ -148,7 +168,7 @@ await page.waitForTimeout(3000);
         url: cleanText(item.url),
         priceText: cleanText(item.priceText)
       }))
-      .filter((item) => item.asin && item.title && item.url && item.priceText);
+      .filter((item) => item.asin && item.title && item.url);
 
     const deduped = new Map<string, DomItem>();
     for (const item of filtered) {
