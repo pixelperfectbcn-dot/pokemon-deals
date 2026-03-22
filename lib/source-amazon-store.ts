@@ -1,12 +1,12 @@
 import { chromium } from "playwright";
 import type { Deal } from "./types";
-import { normalizeText, parsePriceFromText } from "./text";
+import { normalizeText, parsePriceFromText, stripHtml } from "./text";
 
-type DomItem = {
+type ParsedItem = {
   asin: string;
   title: string;
   url: string;
-  priceText?: string;
+  price?: number;
 };
 
 function classifyProduct(title: string) {
@@ -67,26 +67,81 @@ function cleanText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function unescapeJsonText(value: string) {
+  return value
+    .replace(/\\"/g, '"')
+    .replace(/\\u0026/g, "&")
+    .replace(/\\u003d/g, "=")
+    .replace(/\\u002F/g, "/")
+    .replace(/\\\\/g, "\\");
+}
+
+function parseAmountFromBlock(block: string): number | undefined {
+  const offscreen = block.match(/<span class="a-offscreen">([^<]+)<\/span>/i);
+  if (offscreen) return parsePriceFromText(offscreen[1]);
+
+  const amount = block.match(/"amount"\s*:\s*(\d+(?:\.\d+)?)/i);
+  if (amount) return Number(amount[1]);
+
+  const displayString = block.match(/"displayString"\s*:\s*"([^"]+)"/i);
+  if (displayString) return parsePriceFromText(displayString[1]);
+
+  return undefined;
+}
+
+function parseItemsFromHtml(html: string, baseUrl: string): ParsedItem[] {
+  const items: ParsedItem[] = [];
+  const seen = new Set<string>();
+
+  const asinRegex = /data-asin="([A-Z0-9]{10})"|"data-asin"\s*:\s*"([A-Z0-9]{10})"|\/dp\/([A-Z0-9]{10})/g;
+  const asinMatches = [...html.matchAll(asinRegex)];
+
+  for (const raw of asinMatches) {
+    const asin = raw[1] || raw[2] || raw[3];
+    if (!asin || seen.has(asin)) continue;
+
+    const index = raw.index ?? 0;
+    const block = html.slice(Math.max(0, index - 5000), Math.min(html.length, index + 20000));
+
+    const titleMatch =
+      block.match(/<h2[^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>[\s\S]*?<\/h2>/i) ||
+      block.match(/aria-label="([^"]+)"/i) ||
+      block.match(/"title"\s*:\s*"([^"]+)"/i);
+
+    const hrefMatch =
+      block.match(new RegExp(`href="([^"]*\\/dp\\/${asin}[^"]*)"`, "i")) ||
+      block.match(new RegExp(`"(\\/[^"]*\\/dp\\/${asin}[^"]*)"`, "i"));
+
+    const title = titleMatch ? cleanText(stripHtml(unescapeJsonText(titleMatch[1]))) : "";
+    const price = parseAmountFromBlock(block);
+    const url = hrefMatch ? absoluteUrl(unescapeJsonText(hrefMatch[1]), baseUrl) : absoluteUrl(`/dp/${asin}`, baseUrl);
+
+    if (!title || typeof price !== "number" || price <= 0) continue;
+
+    items.push({ asin, title, url, price });
+    seen.add(asin);
+  }
+
+  return items;
+}
+
 async function autoScroll(page: any) {
   await page.evaluate(async () => {
     await new Promise<void>((resolve) => {
-      let totalHeight = 0;
-      const distance = 1000;
+      let steps = 0;
       const timer = setInterval(() => {
-        const scrollHeight = document.body.scrollHeight;
-        window.scrollBy(0, distance);
-        totalHeight += distance;
-
-        if (totalHeight >= scrollHeight * 2) {
+        window.scrollBy(0, window.innerHeight);
+        steps += 1;
+        if (steps >= 8) {
           clearInterval(timer);
           resolve();
         }
-      }, 400);
+      }, 500);
     });
   });
 }
 
-async function scrapeWithPlaywright(storeUrl: string, baseUrl: string): Promise<DomItem[]> {
+async function collectHtmlWithPlaywright(storeUrl: string): Promise<string[]> {
   const browser = await chromium.launch({
     headless: true,
     args: [
@@ -117,11 +172,7 @@ async function scrapeWithPlaywright(storeUrl: string, baseUrl: string): Promise<
     });
 
     await page.goto(storeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-
-    // La clave: .a-offscreen suele estar oculto y nunca estará "visible".
-    // Esperamos a que existan productos y luego hacemos scroll para cargar más bloques.
-    await page.waitForSelector("[data-asin]", { timeout: 30000, state: "attached" });
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(6000);
     await autoScroll(page);
     await page.waitForTimeout(4000);
 
@@ -130,59 +181,21 @@ async function scrapeWithPlaywright(storeUrl: string, baseUrl: string): Promise<
       throw new Error("Amazon mostró captcha en Playwright");
     }
 
-    const rawItems = await page.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll("[data-asin]"));
-      return cards.map((card) => {
-        const asin = card.getAttribute("data-asin") || "";
-        const title =
-          (card.querySelector("h2 span")?.textContent ||
-            card.querySelector('[aria-label]')?.getAttribute("aria-label") ||
-            "") as string;
+    const htmls: string[] = [];
+    const mainHtml = await page.content();
+    htmls.push(mainHtml);
 
-        const link =
-          (card.querySelector('a[href*="/dp/"]')?.getAttribute("href") ||
-            card.querySelector("a")?.getAttribute("href") ||
-            "") as string;
-
-        const priceText =
-          (card.querySelector(".a-offscreen")?.textContent ||
-            card.querySelector('[class*="price"] .a-offscreen')?.textContent ||
-            "") as string;
-
-        return {
-          asin,
-          title,
-          url: link,
-          priceText
-        };
-      });
-    });
-
-    console.log("PLAYWRIGHT RAW ITEMS:", rawItems.length);
-    console.log("PLAYWRIGHT RAW SAMPLE:", JSON.stringify(rawItems.slice(0, 5)));
-
-    const filtered = rawItems
-      .map((item) => ({
-        asin: cleanText(item.asin),
-        title: cleanText(item.title),
-        url: cleanText(item.url),
-        priceText: cleanText(item.priceText)
-      }))
-      .filter((item) => item.asin && item.title && item.url);
-
-    const deduped = new Map<string, DomItem>();
-    for (const item of filtered) {
-      if (!deduped.has(item.asin)) {
-        deduped.set(item.asin, {
-          asin: item.asin,
-          title: item.title,
-          url: absoluteUrl(item.url, baseUrl),
-          priceText: item.priceText
-        });
-      }
+    for (const frame of page.frames()) {
+      try {
+        const content = await frame.content();
+        if (content && content.length > 1000) htmls.push(content);
+      } catch {}
     }
 
-    return [...deduped.values()];
+    console.log("PLAYWRIGHT HTML COUNT:", htmls.length);
+    console.log("PLAYWRIGHT HTML LENGTHS:", htmls.map((v) => v.length).join(","));
+
+    return htmls;
   } finally {
     await browser.close();
   }
@@ -205,13 +218,21 @@ export async function fetchAmazonOfficialStoreDeals(): Promise<Omit<Deal, "id" |
     throw new Error("AMAZON_STORE_URL no está configurada");
   }
 
-  const rawItems = await scrapeWithPlaywright(storeUrl, baseUrl);
+  const htmls = await collectHtmlWithPlaywright(storeUrl);
+
+  const merged = new Map<string, ParsedItem>();
+  for (const html of htmls) {
+    const parsed = parseItemsFromHtml(html, baseUrl);
+    for (const item of parsed) {
+      if (!merged.has(item.asin)) merged.set(item.asin, item);
+    }
+  }
+
+  const rawItems = [...merged.values()];
+  console.log("PLAYWRIGHT PARSED ITEMS:", rawItems.length);
+  console.log("PLAYWRIGHT PARSED SAMPLE:", JSON.stringify(rawItems.slice(0, 5)));
 
   const filtered = rawItems
-    .map((item) => {
-      const price = item.priceText ? parsePriceFromText(item.priceText) : undefined;
-      return { ...item, price };
-    })
     .filter((item) => typeof item.price === "number" && item.price > 0)
     .filter((item) => {
       const normalized = normalizeText(item.title);
